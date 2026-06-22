@@ -2,8 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from indeterminatebeam import Beam, Support, PointLoad, Udl
-import io
+from indeterminatebeam import Beam, Support, PointLoadV, UDLV
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Structural Beam Analyzer Pro", page_icon="🏗️", layout="wide")
@@ -89,7 +88,7 @@ with col_l1:
         with p_col2:
             p_loc = st.slider(f"Load {i+1} Position (m)", 0.0, length, length/2, key=f"ploc_{i}")
         if p_mag > 0:
-            loads.append(PointLoad(-p_mag, p_loc))
+            loads.append(PointLoadV(-p_mag, p_loc))
 
 with col_l2:
     st.subheader("Uniformly Distributed Loads (UDL)")
@@ -103,7 +102,7 @@ with col_l2:
         with u_col3:
             u_end = st.slider(f"UDL {i+1} End (m)", 0.0, length, length, key=f"uend_{i}")
         if u_mag > 0 and u_start < u_end:
-            loads.append(Udl(-u_mag, (u_start, u_end)))
+            loads.append(UDLV(-u_mag, (u_start, u_end)))
 
 # --- SOLVER EXECUTION ---
 if not loads:
