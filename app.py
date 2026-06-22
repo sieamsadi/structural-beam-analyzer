@@ -67,7 +67,7 @@ boundary_type = st.sidebar.selectbox("Boundary Arrangement", ["Simply Supported"
 
 supports = []
 if boundary_type == "Simply Supported":
-    supports = [Support(0, (1, 1, 0)), Support(length, (1, 0, 0))]
+    supports = [Support(0, (1, 1, 0)), Support(length, (0, 1, 0))]
 elif boundary_type == "Cantilever":
     supports = [Support(0, (1, 1, 1))]
 else:
