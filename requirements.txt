@@ -1,5 +1,7 @@
 streamlit>=1.30.0
-indeterminatebeam>=2.2.0
-plotly>=5.18.0
 numpy>=1.24.0
 pandas>=2.0.0
+plotly>=5.18.0
+sympy>=1.12
+matplotlib>=3.7.0
+indeterminatebeam==2.2.0
