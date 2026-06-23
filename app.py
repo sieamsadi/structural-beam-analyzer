@@ -7,7 +7,7 @@ from indeterminatebeam import Beam, Support, PointLoadV, UDLV
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Structural Beam Analyzer Pro", page_icon="🏗️", layout="wide")
 
-# Custom CSS styling for an industrial dashboard look
+# Custom CSS styling for a clean, industrial dashboard look
 st.markdown("""
     <style>
     .reportview-container { background: #F8FAFC }
@@ -20,17 +20,17 @@ st.markdown("""
 st.markdown('<div class="main-title">🏗️ Enterprise Structural Beam Analyzer</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Production-grade 1D Finite Element Analysis solver for commercial engineering design compliance.</div>', unsafe_allow_html=True)
 
-# --- LOAD DATASET ---
+# --- LOAD DATASET (With built-in safety fallback) ---
 @st.cache_data
 def load_steel_data():
     try:
         df = pd.read_csv("data/aisc_w_shapes.csv")
         return df
     except:
-        # Fallback dataset if file is missing during setup
+        # Fallback dataset if the CSV folder hasn't synced to the cloud yet
         data = {
             'Designation': ['W12X26', 'W14X30', 'W16X31', 'W18X50', 'W24X68'],
-            'Ix': [204, 291, 375, 800, 1830],
+            'Ix': [204.0, 291.0, 375.0, 800.0, 1830.0],
             'Zx': [37.2, 47.3, 54.0, 101.0, 177.0]
         }
         return pd.DataFrame(data)
@@ -53,7 +53,7 @@ if profile_source == "AISC Standard W-Shapes (I-Beam)":
     selected_shape = st.sidebar.selectbox("Select AISC Designation", steel_df['Designation'].tolist())
     row = steel_df[steel_df['Designation'] == selected_shape].iloc[0]
     
-    # Convert from Imperial (inches^4 and inches^3) to Metric SI Units (m^4 and m^3)
+    # Convert Imperial database units (in⁴ and in³) to Metric SI Units (m⁴ and m³)
     I = float(row['Ix']) * 4.162314e-7
     Z = float(row['Zx']) * 1.638706e-5
     st.sidebar.caption(f"Configured Properties: I = {I:.3e} m⁴ | Z = {Z:.3e} m³")
@@ -67,10 +67,13 @@ boundary_type = st.sidebar.selectbox("Boundary Arrangement", ["Simply Supported"
 
 supports = []
 if boundary_type == "Simply Supported":
+    # (x, y, moment) -> Left is Pin (1,1,0), Right is Roller (0,1,0)
     supports = [Support(0, (1, 1, 0)), Support(length, (0, 1, 0))]
 elif boundary_type == "Cantilever":
+    # Fixed at the left wall (1,1,1)
     supports = [Support(0, (1, 1, 1))]
 else:
+    # Clamped at both walls
     supports = [Support(0, (1, 1, 1)), Support(length, (1, 1, 1))]
 
 # --- CORE ENGINEERING LOGIC & LOADS ---
@@ -120,10 +123,11 @@ else:
         shear_forces = [beam.get_shear_force(x) / 1000 for x in x_space]
         bending_moments = [beam.get_bending_moment(x) / 1000 for x in x_space]
         
-        # Scaling analytical deflection out of normalized defaults
+        # Scale analytical deflection relative to user's custom E and I
         deflections = np.array([beam.get_deflection(x) * 1000 for x in x_space]) * ((200e9 * 1e-4) / (E * I))
+        worst_deflection = deflections[np.argmax(np.abs(deflections))]
         
-        # Max engineering constraints verification
+        # Stress verification: σ = M / Z
         max_moment_nm = np.max(np.abs(bending_moments)) * 1000
         max_stress_pa = max_moment_nm / Z
         max_stress_mpa = max_stress_pa / 1e6
@@ -133,13 +137,13 @@ else:
         st.write("---")
         m1, m2, m3, m4 = st.columns(4)
         with m1:
-            st.markdown(f'<div class="card"><small>MAX MOMENT</small><br><b style="font-size:1.5rem; color:#EF4444;">{np.max(np.abs(bending_moments)):.2f} kN·m</b></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><small>MAX BENDING MOMENT</small><br><b style="font-size:1.5rem; color:#EF4444;">{np.max(np.abs(bending_moments)):.2f} kN·m</b></div>', unsafe_allow_html=True)
         with m2:
-            st.markdown(f'<div class="card"><small>MAX DEFLECTION</small><br><b style="font-size:1.5rem; color:#3B82F6;">{np.min(deflections):.2f} mm</b></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><small>WORST DEFLECTION</small><br><b style="font-size:1.5rem; color:#3B82F6;">{worst_deflection:.2f} mm</b></div>', unsafe_allow_html=True)
         with m3:
-            st.markdown(f'<div class="card"><small>MAX FLEXURAL STRESS</small><br><b style="font-size:1.5rem; color:#10B981;">{max_stress_mpa:.1f} MPa</b></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><small>MAX NORMAL STRESS</small><br><b style="font-size:1.5rem; color:#10B981;">{max_stress_mpa:.1f} MPa</b></div>', unsafe_allow_html=True)
         with m4:
-            card_color = "#10B981" if safety_factor >= 1.5 else "#EF4444"
+            card_color = "#10B981" if safety_factor >= 1.5 else "#F59E0B" if safety_factor >= 1.0 else "#EF4444"
             st.markdown(f'<div class="card" style="border-left-color:{card_color};"><small>FACTOR OF SAFETY</small><br><b style="font-size:1.5rem; color:{card_color};">{safety_factor:.2f}</b></div>', unsafe_allow_html=True)
 
         # --- CHARTS VIEW GENERATION ---
@@ -149,26 +153,31 @@ else:
         with graph_tab:
             # Chart 1: Moment
             f_m = go.Figure()
-            f_m.add_trace(go.Scatter(x=x_space, y=bending_moments, fill='tozeroy', line_color='#EF4444', name="Moment"))
-            f_m.update_layout(title="Bending Moment Diagram (BMD)", xaxis_title="Position along span (m)", yaxis_title="Moment (kN·m)", template="plotly_white", height=300)
+            f_m.add_trace(go.Scatter(x=x_space, y=bending_moments, fill='tozeroy', line_color='#EF4444', name="Moment (kN·m)"))
+            f_m.update_layout(title="Bending Moment Diagram (BMD)", xaxis_title="Position along span (m)", yaxis_title="Moment (kN·m)", template="plotly_white", height=320)
             st.plotly_chart(f_m, use_container_width=True)
             
             # Chart 2: Deflection
             f_d = go.Figure()
-            f_d.add_trace(go.Scatter(x=x_space, y=deflections, line=dict(color='#3B82F6', width=3), name="Deflection"))
-            f_d.update_layout(title="Elastic Deflection Curve (Sag Profile)", xaxis_title="Position along span (m)", yaxis_title="Deflection (mm)", template="plotly_white", height=300)
-            f_d.update_yaxes(autorange="reverse")
+            f_d.add_trace(go.Scatter(x=x_space, y=deflections, line=dict(color='#3B82F6', width=3), name="Deflection (mm)"))
+            f_d.update_layout(
+                title="Elastic Deflection Curve (Sag Profile)", 
+                xaxis_title="Position along span (m)", 
+                yaxis_title="Deflection (mm)", 
+                template="plotly_white", 
+                height=320,
+                yaxis_autorange="reversed"
+            )
             st.plotly_chart(f_d, use_container_width=True)
             
         with data_tab:
             st.subheader("Calculation Memo Checksum Log")
-            st.text(f"Material: {material} | Elastic Modulus: {E/1e9:.1f} GPa | Yield Criteria: {sigma_yield/1e6:.1f} MPa")
-            st.text(f"Evaluated Structural Moment of Inertia (Izz): {I:.5e} m4")
-            st.text(f"Evaluated Structural Elastic Section Modulus (Z): {Z:.5e} m3")
+            st.text(f"Material: {material} | Elastic Modulus: {E/1e9:.1f} GPa | Yield Strength: {sigma_yield/1e6:.1f} MPa")
+            st.text(f"Evaluated Second Moment of Area (Izz): {I:.5e} m⁴")
+            st.text(f"Evaluated Elastic Section Modulus (Z): {Z:.5e} m³")
             
-            # Simulated Report Generator Download trigger
-            memo_txt = f"STRUCTURAL CALCULATION REPORT\nElement: Horizontal Beam\nMaterial: {material}\nMax Stress: {max_stress_mpa:.2f} MPa\nSafety Factor: {safety_factor:.2f}"
-            st.download_button("Download Simple Structural Memo Text", data=memo_txt, file_name="structural_calculation_memo.txt")
+            memo_txt = f"STRUCTURAL CALCULATION MEMO\nSpan: {length}m | Material: {material}\nMax Normal Stress: {max_stress_mpa:.2f} MPa\nFactor of Safety: {safety_factor:.2f}\nStatus: {'COMPLIANT' if safety_factor >= 1.0 else 'NON-COMPLIANT'}"
+            st.download_button("Download Official Structural Memo (.txt)", data=memo_txt, file_name=f"beam_calc_{selected_shape if profile_source=='AISC Standard W-Shapes (I-Beam)' else 'Custom'}.txt")
 
     except Exception as error_msg:
-        st.error(f"Solver Exception Event: Convergence failed due to mathematical geometric constraint errors. Details: {error_msg}")
+        st.error(f"Solver Exception Event: Mathematical geometric constraint error. Please verify loads sit strictly inside the 0.0m to {length}m span. Details: {error_msg}")
